@@ -41,3 +41,10 @@ target_wrapper.*
 
 # QtCreator CMake
 CMakeLists.txt.user*
+
+# PyOtherSide + my stuff
+.vscode/
+*.pyc
+*/*.pyc
+__pycache__
+*/__pycache__
