@@ -44,8 +44,13 @@ ApplicationWindow
 
     PositionSource {
         id: gps
-        updateInterval: 5000
-        active: false
+        updateInterval: 500000
+        active: true
+        onPositionChanged: {
+            if (position.latitudeValid && position.longitudeValid)
+                gps.stop()
+            console.log(position.coordinate)
+        }
     }
 
     NotificationMonitor {
@@ -92,11 +97,7 @@ ApplicationWindow
 
     MusicController {
         id: musicController
-        onMetadataChanged: {
-            python.call("wrapper.app.device.push_music_update", [
-                            musicController.title, musicController.artist,
-                            musicController.album, ], function () {})
-        }
+        onMetadataChanged: bandController.updateMusicTile(title, artist, album)
     }
 
     BandController {

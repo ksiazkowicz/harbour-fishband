@@ -26,6 +26,8 @@ Item {
 
         if (macAddress !== deviceConf.macAddress)
             deviceConf.macAddress = macAddress
+
+        updateMusicTile("NA", "NA", "NA")
     }
 
     function sync() {
@@ -38,6 +40,11 @@ Item {
         }
         isSyncing = true
         python.call('wrapper.app.sync', [], function() {})
+    }
+
+    function updateMusicTile(title, artist, album) {
+        python.call("wrapper.app.device.push_music_update", [
+                        title, artist, album, ], function () {})
     }
 
     function smsNotification(summary, body) {
@@ -104,9 +111,10 @@ Item {
             })
 
             setHandler("MusicControl", function (command) {
-                if (command === "PlayPause") musicControlPlay();
-                if (command === "Previous") musicControlPrev();
-                if (command === "Next") musicControlNext();
+                console.log(command)
+                if (command === "playButtonText") musicControlPlay();
+                if (command === "prevButtonText") musicControlPrev();
+                if (command === "nextButtonText") musicControlNext();
                 if (command === "VolumeUp") musicControlVolUp();
                 if (command === "VolumeDown") musicControlVolDown();
             })

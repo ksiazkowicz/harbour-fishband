@@ -1,4 +1,5 @@
 from __future__ import unicode_literals
+import uuid
 import struct
 import requests
 import geocoder
@@ -10,15 +11,15 @@ from .commands import PUSH_NOTIFICATION
 import pyotherside
 
 
-NO_IDEA_YET = [
-    (3735, 30229, 38093, 19797, 32644, 32442, 50335, 58888),
-    (15596, 32727, 60860, 19514, 46265, 57004, 38178, 12561),
-    (13405, 46662, 7844, 18546, 57266, 42681, 41232, 63154),
-    (35999, 55224, 24129, 16535, 8325, 11477, 10779, 27963),
-    (14222, 59016, 44069, 16996, 21434, 64947, 26524, 44522),
-    (4719, 49247, 62971, 19866, 46728, 7394, 46087, 54133),
-    (49034, 53474, 41697, 17943, 47755, 3542, 16507, 13324),
-    (52482, 47405, 8690, 16904, 2711, 64587, 24984, 32404),
+PAGE_IDS = [
+    uuid.UUID("76150e97-94cd-4d55-847f-ba7e9fc408e6"),  # Last page
+    uuid.UUID("7fd73cec-edbc-4c3a-b9b4-acde22951131"),
+    uuid.UUID("b646345d-1ea4-4872-b2df-b9a610a1b2f6"),
+    uuid.UUID('d7b88c9f-5e41-4097-8520-d52c1b2a3b6d'),
+    uuid.UUID('e688378e-ac25-4264-ba53-b3fd9c67eaad'),
+    uuid.UUID('c05f126f-f5fb-4d9a-88b6-e21c07b475d3'),
+    uuid.UUID('d0e2bf8a-a2e1-4617-8bba-d60d7b400c34'),
+    uuid.UUID('b92dcd02-21f2-4208-970a-4bfc9861947e'),
 ]
 
 # icons: 1 - Stars (Clear)
@@ -38,44 +39,9 @@ ICON_MAP = {
     23: 3,  # Rain Showers
     24: 0,  # Mostly Sunny
     27: 4,  # Storms
-    28: 0,  # Partly Sunny
+    28: 1,  # Clear
+    29: 1,  # Mostly Clear
 }
-
-
-def serialize_last_update(when, where):
-    notification = layouts.make_item(
-        layouts.ELEMENT_TEXT, 1, 1, "Last updated")
-    notification += layouts.make_item(layouts.ELEMENT_TEXT, 2, 1, when)
-    notification += layouts.make_item(layouts.ELEMENT_TEXT, 3, 1, where)
-
-    result = struct.pack("HH", len(notification), layouts.TEXT)
-    result += struct.pack("H"*len(NO_IDEA_YET[0]), *NO_IDEA_YET[0])
-    result += struct.pack("H", 0) + notification
-    return result
-
-
-def serialize_forecast(something, day, weather_type, icon,
-                       temp_high=None, temp_low=None):
-    notification = layouts.make_item(layouts.ELEMENT_TEXT, 1, 1, day)
-
-    if weather_type:
-        notification += layouts.make_item(layouts.ELEMENT_TEXT, 1, 2, "|")
-        notification += layouts.make_item(layouts.ELEMENT_TEXT, 1, 3,
-                                          weather_type)
-
-    notification += layouts.make_item(layouts.ELEMENT_ICON, 2, 1,
-                                      icon_id=ICON_MAP.get(icon, icon))
-    notification += layouts.make_item(layouts.ELEMENT_TEXT, 2, 2,
-                                      temp_high + "\xb0")
-
-    if temp_low:
-        notification += layouts.make_item(layouts.ELEMENT_TEXT, 2, 3,
-                                          "/" + temp_low + "\xb0")
-
-    result = struct.pack("HH", len(notification), layouts.FORECAST)
-    result += struct.pack("H"*len(something), *something)
-    result += struct.pack("H", 0) + notification
-    return result
 
 
 class WeatherService:
@@ -109,6 +75,7 @@ class WeatherService:
               ",%s?days=%s&units=%s&appid=3FB8A36C-B005-4332-96F1-CAFA" \
               "D7A25D2C&formcode=KAPP" % (
                       self.lat, self.lon, self.days, self.units)
+        pyotherside.send("ForecastDebug", [self.lat, self.lon, self.place])
         response = requests.get(url)
 
         try:
@@ -119,12 +86,17 @@ class WeatherService:
         self.last_update = datetime.now()
 
         forecasts = [
-            serialize_last_update(
-                self.last_update.strftime("%m/%d %H:%M"), self.place),
+            layouts.MultilineTextLayout.serialize_as_update(
+                PAGE_IDS[0], {
+                    "line_1": "Last updated",
+                    "line_2": self.last_update.strftime("%m/%d %H:%M"),
+                    "line_3": self.place
+                }),
         ]
 
         for i, forecast in enumerate(response):
-            forecasts.append(serialize_forecast(NO_IDEA_YET[i+1], **forecast))
+            forecasts.append(layouts.HeaderSecondaryLargeIconAndMetricLayout.
+                             serialize_as_update(PAGE_IDS[i+1], forecast))
 
         return self.push_forecast(forecasts)
 
@@ -132,26 +104,31 @@ class WeatherService:
         weather = response.get("responses", [])[0].get("weather", [])[0]
         current = weather.get("current")
         forecasts = weather.get("forecast", {}).get("days", [])
+        now_icon = current.get("icon", 0)
         weather_args = [{
-            "day": "Now",
-            "weather_type": current.get("cap", ""),
-            "icon": current.get("icon", 0),
-            "temp_high": "%d" % current.get("temp", 0),
+            "header": "Now",
+            "separator": "|",
+            "secondary": current.get("cap", ""),
+            "largeIcon": ICON_MAP.get(now_icon, now_icon),
+            "metric": "%d" % current.get("temp", 0) + "\xb0",
         }]
+        pyotherside.send("Debug", [now_icon, str(type(now_icon))])
         now = datetime.now()
+
+        pyotherside.send("Debug", [(x.get("icon"), x.get("cap", "")) for x in forecasts])
+
         weather_args += [{
-            "day": (now + timedelta(days=i)).strftime("%A") if i > 0 else "Today",
-            "weather_type": None,
-            "icon": day.get("icon"),
-            "temp_high": "%d" % day.get("tempHi", 0),
-            "temp_low": "%d" % day.get("tempLo", 0)
+            "header": (now + timedelta(days=i)).strftime("%A") if i > 0 else "Today",
+            "largeIcon": ICON_MAP.get(day.get("icon"), day.get("icon")),
+            "metric": "%d" % day.get("tempHi", 0) + "\xb0",
+            "secondary_metric": "/%d" % day.get("tempLo", 0) + "\xb0"
         } for i, day in enumerate(forecasts)]
         return reversed(weather_args)
 
     def push_forecast(self, forecasts):
         self.band.clear_tile(WEATHER)
 
-        update_prefix = NOTIFICATION_TYPES["GenericUpdate"] + b"\x00"
+        update_prefix = NOTIFICATION_TYPES["GenericUpdate"]
         update_prefix += WEATHER.bytes_le
 
         success = False

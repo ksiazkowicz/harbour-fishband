@@ -4,7 +4,6 @@ import time
 import struct
 import binascii
 import uuid
-import atexit
 import json
 import pyotherside
 import threading
@@ -18,8 +17,13 @@ from .commands import SERIAL_NUMBER_REQUEST, PUSH_NOTIFICATION, \
                       START_STRIP_SYNC_START
 from .filetimes import convert_back
 from .tiles import FEED, EMAIL, SMS, CALLS, FBMESSENGER, MUSIC_CONTROL
-from . import CARGO_SERVICE_PORT, CARGO_SERVICE_UUID, TIMEOUT, BUFFER_SIZE, \
+from . import CARGO_SERVICE_PORT, PUSH_SERVICE_PORT, TIMEOUT, BUFFER_SIZE, \
               NOTIFICATION_TYPES
+
+
+NOW_PLAYING_PAGE = uuid.UUID("132e8f71-04a1-40e1-8d92-6e15214a80e2")
+CONTROLS_PAGE = uuid.UUID("84c43f9d-90c9-4efb-8aa6-d673617d3ac4")
+VOLUME_PAGE = uuid.UUID("545024f9-ccec-4962-8c21-e3835cf6b506")
 
 
 def decode_color(color):
@@ -28,10 +32,13 @@ def decode_color(color):
         "g": color >> 8 & 255,
         "b": color & 255
     }
-    # "rgb(%d, %d, %d)" % (color >> 16 & 255, color >> 8 & 255, color & 255)
+
 
 def cuint32_to_hex(color):
-    return "#{0:02x}{1:02x}{2:02x}".format(color >> 16 & 255, color >> 8 & 255, color & 255)
+    return "#{0:02x}{1:02x}{2:02x}".format(color >> 16 & 255, 
+                                           color >> 8 & 255, 
+                                           color & 255)
+
 
 def encode_color(alpha, r, g, b):
     return (alpha << 24 | r << 16 | g << 8 | b)
@@ -51,33 +58,32 @@ class BandDevice:
         self.address = address
         self.push = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
         self.cargo = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-        atexit.register(self.disconnect)
+        pyotherside.atexit(self.disconnect)
 
         # start push thread
         self.push_thread = threading.Thread(target=self.listen_pushservice)
         self.push_thread.start()
 
     def push_music_update(self, title, artist, album):
-        something = (36721, 4910, 1185, 16609, 37517, 5486, 18977, 57984)
-        update_prefix = NOTIFICATION_TYPES["GenericUpdate"] + b"\x00"
+        update_prefix = NOTIFICATION_TYPES["GenericUpdate"]
         update_prefix += MUSIC_CONTROL.bytes_le
 
         success = False
 
-        notification = layouts.make_item(
-            layouts.ELEMENT_TEXT, 0, 8, title)
-        notification += layouts.make_item(layouts.ELEMENT_TEXT, 0, 9, artist)
-        notification += layouts.make_item(layouts.ELEMENT_TEXT, 1, 0, album)
+        pages = [
+            layouts.MusicControlLayout.serialize_as_update(CONTROLS_PAGE),
+            layouts.NowPlayingLayout.serialize_as_update(NOW_PLAYING_PAGE, {
+                "title": title, "artist": artist, "album": album
+            }),
+            layouts.VolumeButtonsLayout.serialize_as_update(VOLUME_PAGE),
+        ]
 
-        result = struct.pack("HH", len(notification), layouts.TEXT)
-        result += struct.pack("H"*len(something), *something)
-        result += struct.pack("H", 0) + notification
+        for page in pages:
+            page_update = update_prefix + page
+            self.send(
+                PUSH_NOTIFICATION + struct.pack("<i", len(page_update)))
 
-        packet = update_prefix + result
-        self.send(
-            PUSH_NOTIFICATION + struct.pack("<i", len(packet)))
-        success, result = self.send_for_result(packet)
-        pyotherside.send("Debug", success)
+            success, result = self.send_for_result(page_update)
         return success
 
     def listen_pushservice(self):
@@ -100,16 +106,19 @@ class BandDevice:
                 "tile_name": tile_name,
             })
 
-            if guid == MUSIC_CONTROL and command == binascii.unhexlify("9d3fc484c990fb4e8aa6d673617d3ac40300"):
-                pyotherside.send("MusicControl", "PlayPause")
-            elif guid == MUSIC_CONTROL and command == binascii.unhexlify("9d3fc484c990fb4e8aa6d673617d3ac40200"):
-                pyotherside.send("MusicControl", "Previous")
-            elif guid == MUSIC_CONTROL and command == binascii.unhexlify("9d3fc484c990fb4e8aa6d673617d3ac40500"):
-                pyotherside.send("MusicControl", "Next")
-            elif guid == MUSIC_CONTROL and command == binascii.unhexlify("f9245054eccc62498c21e3835cf6b5060700"):
-                pyotherside.send("MusicControl", "VolumeUp")
-            elif guid == MUSIC_CONTROL and command == binascii.unhexlify("f9245054eccc62498c21e3835cf6b5060600"):
-                pyotherside.send("MusicControl", "VolumeDown")
+            if guid == MUSIC_CONTROL:
+                pyotherside.send("Debug", command[-2:])
+                try:
+                    button_id = struct.unpack("H", command[-2:])[0]
+                except:
+                    # can't unpack button ID
+                    return
+                if CONTROLS_PAGE.bytes_le in command:
+                    button = layouts.MusicControlLayout.get_key(button_id)
+                    pyotherside.send("MusicControl", button)
+                elif VOLUME_PAGE.bytes_le in command:
+                    button = layouts.VolumeButtonsLayout.get_key(button_id)
+                    pyotherside.send("MusicControl", button)
 
     def sync(self, services):
         for service in services:
@@ -133,7 +142,7 @@ class BandDevice:
                 time.sleep(timeout)
 
     def clear_tile(self, guid):
-        notification = NOTIFICATION_TYPES["GenericClearTile"] + b"\x00"
+        notification = NOTIFICATION_TYPES["GenericClearTile"]
         notification += guid.bytes_le
         self.send(PUSH_NOTIFICATION + struct.pack("<i", len(notification)))
         self.send_for_result(notification)
@@ -262,7 +271,7 @@ class BandDevice:
             print("GUID not provided")
             return
 
-        notification = flags + b"\x00" + guid.bytes_le
+        notification = flags + guid.bytes_le
         notification += struct.pack("H", len(title)*2)
         notification += struct.pack("H", len(text)*2)
         timestamp_string = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')

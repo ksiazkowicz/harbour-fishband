@@ -49,54 +49,78 @@ Page {
             ListElement {
                 // Electric
                 themeColor: "#00b9f2"
-                themeBase: 4278237682
-                themeHighlight: 4284145919
-                themeLowlight: 4278235867
-                themeSecondaryText: 4288584605
-                themeHighContrast: 4279095807
-                themeMuted: 4278413941
+                themeBase: 4278237682; themeHighlight: 4284145919
+                themeLowlight: 4278235867; themeSecondaryText: 4288584605
+                themeHighContrast: 4279095807; themeMuted: 4278413941
                 isAmbience: false
             }
             ListElement {
                 // Flame
                 isAmbience: false
-                themeColor: '#f0530e'; themeBase: 4293939982; themeHighlight: 4294731325; themeLowlight: 4292690958; themeSecondaryText: 4288584605; themeHighContrast: 4294930248; themeMuted: 4286521115
+                themeColor: '#f0530e'; themeBase: 4293939982
+                themeHighlight: 4294731325; themeLowlight: 4292690958
+                themeSecondaryText: 4288584605; themeHighContrast: 4294930248
+                themeMuted: 4286521115
             }
             ListElement {
                 // Fuchsia
                 isAmbience: false
-                themeColor: "#d936d9"; themeBase: 4292425433; themeHighlight: 4294192895; themeLowlight: 4290917574; themeSecondaryText: 4288584605; themeHighContrast: 4293938169; themeMuted: 4286254980
+                themeColor: "#d936d9"; themeBase: 4292425433
+                themeHighlight: 4294192895; themeLowlight: 4290917574
+                themeSecondaryText: 4288584605; themeHighContrast: 4293938169
+                themeMuted: 4286254980
             }
             ListElement {
                 // Joule
                 isAmbience: false
-                themeColor: "#ffaf00"; themeBase: 4294946560; themeHighlight: 4294946560; themeLowlight: 4294547971; themeSecondaryText: 4288387736; themeHighContrast: 4294949888; themeMuted: 4288899072
+                themeColor: "#ffaf00"; themeBase: 4294946560
+                themeHighlight: 4294946560; themeLowlight: 4294547971
+                themeSecondaryText: 4288387736; themeHighContrast: 4294949888
+                themeMuted: 4288899072
             }
             ListElement {
                 // Lime
                 isAmbience: false
-                themeColor: "#99c814"; themeBase: 4288268308; themeHighlight: 4289846038; themeLowlight: 4286162991; themeSecondaryText: 4288584605; themeHighContrast: 4288142144; themeMuted: 4283523866
+                themeColor: "#99c814"; themeBase: 4288268308
+                themeHighlight: 4289846038; themeLowlight: 4286162991
+                themeSecondaryText: 4288584605; themeHighContrast: 4288142144
+                themeMuted: 4283523866
             }
             ListElement {
                 // Orchid
-                themeColor: "#9787af"; themeBase: 4288120751; themeHighlight: 4289503169; themeLowlight: 4286477966; themeSecondaryText: 4288059033; themeHighContrast: 4290225619; themeMuted: 4285030770
+                themeColor: "#9787af"; themeBase: 4288120751
+                themeHighlight: 4289503169; themeLowlight: 4286477966
+                themeSecondaryText: 4288059033; themeHighContrast: 4290225619
+                themeMuted: 4285030770
             }
             ListElement {
                 // Penguin
-                themeColor: "#151515"; themeBase: 4279571733; themeHighlight: 4294946560; themeLowlight: 4279308561; themeSecondaryText: 4286217340; themeHighContrast: 4281348144; themeMuted: 4288899072
+                themeColor: "#151515"; themeBase: 4279571733
+                themeHighlight: 4294946560; themeLowlight: 4279308561
+                themeSecondaryText: 4286217340; themeHighContrast: 4281348144
+                themeMuted: 4288899072
             }
             ListElement {
                 // Violet
                 isAmbience: false
-                themeColor: "#7842cf"; themeBase: 4286071503; themeHighlight: 4287324658; themeLowlight: 4285087676; themeSecondaryText: 4289177514; themeHighContrast: 4287126265; themeMuted: 4282920332
+                themeColor: "#7842cf"; themeBase: 4286071503
+                themeHighlight: 4287324658; themeLowlight: 4285087676
+                themeSecondaryText: 4289177514; themeHighContrast: 4287126265
+                themeMuted: 4282920332
             }
             ListElement {
                 // Berry
-                themeColor: "#771e7c"; themeBase: 4285996668; themeHighlight: 4293412351; themeLowlight: 4284160096; themeSecondaryText: 4289608902; themeHighContrast: 4287309203; themeMuted: 4285996668
+                themeColor: "#771e7c"; themeBase: 4285996668
+                themeHighlight: 4293412351; themeLowlight: 4284160096
+                themeSecondaryText: 4289608902; themeHighContrast: 4287309203
+                themeMuted: 4285996668
             }
             ListElement {
                 // Cargo
-                themeColor: "#7842cf"; themeBase: 4286071503; themeHighlight: 4289227257; themeLowlight: 4284889264; themeSecondaryText: 4287646706; themeHighContrast: 4287258574; themeMuted: 4282590324
+                themeColor: "#7842cf"; themeBase: 4286071503
+                themeHighlight: 4289227257; themeLowlight: 4284889264
+                themeSecondaryText: 4287646706; themeHighContrast: 4287258574
+                themeMuted: 4282590324
             }
 
             ListElement {

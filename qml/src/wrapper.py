@@ -11,11 +11,12 @@ class FishBand:
 
     def weather_service(self):
         weather_services = [
-            isinstance(x, WeatherService) for x in self.services]
+            x for x in self.services if isinstance(x, WeatherService)]
         return weather_services[0] if len(weather_services) else None
 
     def set_location(self, latitude, longitude):
         weather_service = self.weather_service()
+        pyotherside.send("DebugSetLocation", weather_service != None)
         if weather_service:
             weather_service.set_location(longitude, latitude)
 
