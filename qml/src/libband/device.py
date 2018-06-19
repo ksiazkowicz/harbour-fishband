@@ -1,29 +1,21 @@
 from __future__ import print_function
-import bluetooth
-import time
 import struct
 import binascii
 import uuid
 import json
-import pyotherside
 import threading
 from datetime import datetime
 
-from . import layouts
 from .helpers import serialize_text, bytes_to_text
 from .commands import SERIAL_NUMBER_REQUEST, PUSH_NOTIFICATION, \
                       GET_TILES_NO_IMAGES, PROFILE_GET_DATA_APP, \
                       SET_THEME_COLOR, START_STRIP_SYNC_END, \
-                      START_STRIP_SYNC_START
+                      START_STRIP_SYNC_START, READ_ME_TILE_IMAGE, \
+                      WRITE_ME_TILE_IMAGE_WITH_ID, SUBSCRIBE
 from .filetimes import convert_back
-from .tiles import FEED, EMAIL, SMS, CALLS, FBMESSENGER, MUSIC_CONTROL
-from . import CARGO_SERVICE_PORT, PUSH_SERVICE_PORT, TIMEOUT, BUFFER_SIZE, \
-              NOTIFICATION_TYPES
-
-
-NOW_PLAYING_PAGE = uuid.UUID("132e8f71-04a1-40e1-8d92-6e15214a80e2")
-CONTROLS_PAGE = uuid.UUID("84c43f9d-90c9-4efb-8aa6-d673617d3ac4")
-VOLUME_PAGE = uuid.UUID("545024f9-ccec-4962-8c21-e3835cf6b506")
+from .tiles import CALLS
+from .socket import BandSocket
+from . import PUSH_SERVICE_PORT, NOTIFICATION_TYPES, layouts
 
 
 def decode_color(color):
@@ -44,6 +36,18 @@ def encode_color(alpha, r, g, b):
     return (alpha << 24 | r << 16 | g << 8 | b)
 
 
+class DummyWrapper:
+    def print(self, *args, **kwargs):
+        print(*args, **kwargs)
+
+    def send(self, signal, args):
+        print(signal, args)
+
+    def atexit(self, func):
+        import atexit
+        atexit.register(func)
+
+
 class BandDevice:
     address = ""
     cargo = None
@@ -53,123 +57,111 @@ class BandDevice:
     band_name = None
     serial_number = None
     push_thread = None
+    services = {}
+    wrapper = DummyWrapper()
 
     def __init__(self, address):
         self.address = address
-        self.push = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-        self.cargo = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-        pyotherside.atexit(self.disconnect)
+        self.push = BandSocket(self, PUSH_SERVICE_PORT)
+        self.cargo = BandSocket(self)
+        self.wrapper.atexit(self.disconnect)
 
         # start push thread
         self.push_thread = threading.Thread(target=self.listen_pushservice)
         self.push_thread.start()
 
-    def push_music_update(self, title, artist, album):
-        update_prefix = NOTIFICATION_TYPES["GenericUpdate"]
-        update_prefix += MUSIC_CONTROL.bytes_le
+    def connect(self):
+        self.cargo.connect()
 
-        success = False
+    def disconnect(self):
+        self.push.disconnect()
+        self.cargo.disconnect()
 
-        pages = [
-            layouts.MusicControlLayout.serialize_as_update(CONTROLS_PAGE),
-            layouts.NowPlayingLayout.serialize_as_update(NOW_PLAYING_PAGE, {
-                "title": title, "artist": artist, "album": album
-            }),
-            layouts.VolumeButtonsLayout.serialize_as_update(VOLUME_PAGE),
-        ]
+    def process_push(self, guid, command, message):
+        for service in self.services.values():
+            if service.guid == guid:
+                new_message = service.push(guid, command, message)
+                if new_message:
+                    message = new_message
+                    break
+        return message
 
-        for page in pages:
-            page_update = update_prefix + page
-            self.send(
-                PUSH_NOTIFICATION + struct.pack("<i", len(page_update)))
+    def process_tile_callback(self, result):
+        opcode = struct.unpack("I", result[6:10])[0]
+        guid = uuid.UUID(bytes_le=result[10:26])
+        command = result[26:44]
+        tile_name = bytes_to_text(result[44:84])
 
-            success, result = self.send_for_result(page_update)
-        return success
+        message = {
+            "opcode": opcode,
+            "guid": str(guid),
+            "command": binascii.hexlify(command),
+            "tile_name": tile_name,
+        }
+        message = self.process_push(guid, command, message)
+        self.wrapper.send("PushService", message)
+
+    def process_notification_callback(self, result):
+        opcode = struct.unpack("I", result[2:6])[0]
+        guid = uuid.UUID(bytes_le=result[6:22])
+        command = result[22:44]
+
+        message = {
+            "opcode": opcode,
+            "guid": str(guid),
+            "command": str(binascii.hexlify(command)),
+        }
+
+        message = self.process_push(guid, command, message)
+        self.wrapper.send("PushService", message)
 
     def listen_pushservice(self):
-        self.connect_push()
+        self.push.connect()
         while True:
+            result = self.push.receive()
+
+            self.wrapper.print(binascii.hexlify(result))
+
+            packet_type = struct.unpack("H", result[0:2])[0]
+            self.wrapper.print(packet_type)
+
+            if packet_type == 1:
+                # sensor data
+                nie_wiem = struct.unpack("L", result[2:6])
+                subscription_type = struct.unpack("H", result[6:8])
+                missed_samples = struct.unpack("H", result[8:10])
+                data_length = struct.unpack("L", result[10:14])
+                self.wrapper.print(nie_wiem, subscription_type, missed_samples, data_length)
+            elif packet_type == 101:
+                self.process_notification_callback(result)
+            elif packet_type == 204:
+                self.process_tile_callback(result)
+            else:
+                self.wrapper.print(binascii.hexlify(result))
+
+    def subscribe(self, subscription_type):
+        command = SUBSCRIBE + b"\x00"*4 + struct.pack("L", subscription_type) + b"\x00"
+        self.wrapper.print(binascii.hexlify(command))
+        result = self.cargo.send_for_result(command)
+        self.wrapper.print(result)
+
+    def sync(self):
+        for service in self.services.values():
+            self.wrapper.print("%s" % service, end='')
             try:
-                result = self.push.recv(BUFFER_SIZE)
-            except bluetooth.btcommon.BluetoothError as error:
-                self.connect_push()
+                result = getattr(service, "sync")()
+            except:
+                result = False
+            self.wrapper.print("          [%s]" % ("OK" if result else "FAIL"))
 
-            opcode = struct.unpack("I", result[6:10])[0]
-            guid = uuid.UUID(bytes_le=result[10:26])
-            command = result[26:44]
-            tile_name = bytes_to_text(result[44:84])
-
-            pyotherside.send("PushService", {
-                "opcode": opcode,
-                "guid": str(guid),
-                "command": str(binascii.hexlify(command)),
-                "tile_name": tile_name,
-            })
-
-            if guid == MUSIC_CONTROL:
-                pyotherside.send("Debug", command[-2:])
-                try:
-                    button_id = struct.unpack("H", command[-2:])[0]
-                except:
-                    # can't unpack button ID
-                    return
-                if CONTROLS_PAGE.bytes_le in command:
-                    button = layouts.MusicControlLayout.get_key(button_id)
-                    pyotherside.send("MusicControl", button)
-                elif VOLUME_PAGE.bytes_le in command:
-                    button = layouts.VolumeButtonsLayout.get_key(button_id)
-                    pyotherside.send("MusicControl", button)
-
-    def sync(self, services):
-        for service in services:
-            print("%s" % service, end='')
-            result = getattr(service, "sync")()
-            print("          [%s]" % ("OK" if result else "FAIL"))
-
-        print("Sync finished")
-
-    def connect_push(self, timeout=TIMEOUT):
-        while True:
-            try:
-                self.push.close()
-                self.push = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-                self.push.connect((self.address, CARGO_SERVICE_PORT+1))
-                time.sleep(timeout)  # give it some time to connect
-                break
-            except bluetooth.btcommon.BluetoothError as error:
-                self.push.close()
-                print("Could not connect: %s" % error)
-                time.sleep(timeout)
+        self.wrapper.print("Sync finished")
 
     def clear_tile(self, guid):
         notification = NOTIFICATION_TYPES["GenericClearTile"]
         notification += guid.bytes_le
-        self.send(PUSH_NOTIFICATION + struct.pack("<i", len(notification)))
-        self.send_for_result(notification)
-
-    def connect(self, timeout=TIMEOUT):
-        while True:
-            try:
-                self.cargo.close()
-                self.cargo = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-                self.cargo.connect((self.address, CARGO_SERVICE_PORT))
-                time.sleep(timeout)  # give it some time to connect
-                break
-            except bluetooth.btcommon.BluetoothError as error:
-                self.cargo.close()
-                print("Could not connect: %s" % error)
-                time.sleep(timeout)
-
-    def disconnect(self):
-        try:
-            self.cargo.close()
-        except:
-            pass
-        try:
-            self.push.close()
-        except:
-            pass
-        print("Disconnected")
+        self.cargo.send(
+            PUSH_NOTIFICATION + struct.pack("<i", len(notification)))
+        self.cargo.send_for_result(notification)
 
     def set_theme(self, colors):
         """
@@ -177,30 +169,27 @@ class BandDevice:
 
         Base, Highlight, Lowlight, SecondaryText, HighContrast, Muted
         """
-        pyotherside.send("GOT", colors)
-
-        self.send_for_result(START_STRIP_SYNC_START)
-        self.send(SET_THEME_COLOR)
+        self.cargo.send_for_result(START_STRIP_SYNC_START)
+        self.cargo.send(SET_THEME_COLOR)
         colors = struct.pack("I"*6, *[int(x) for x in colors])
-        self.send_for_result(colors)
-        self.send_for_result(START_STRIP_SYNC_END)
+        self.cargo.send_for_result(colors)
+        self.cargo.send_for_result(START_STRIP_SYNC_END)
 
     def get_tiles(self):
         if not self.tiles:
             self.request_tiles()
         return self.tiles
-        
+
     def get_serial_number(self):
         if not self.serial_number:
             # ask nicely for serial number
-            result, number = self.send_for_result(SERIAL_NUMBER_REQUEST)
+            result, number = self.cargo.send_for_result(SERIAL_NUMBER_REQUEST)
             if result:
-                self.serial_number = str(number[0])
-        pyotherside.send("device_serial_number", str(self.serial_number))
+                self.serial_number = number[0].decode("utf-8")
         return self.serial_number
 
     def get_device_info(self):
-        result, info = self.send_for_result(PROFILE_GET_DATA_APP)
+        result, info = self.cargo.send_for_result(PROFILE_GET_DATA_APP)
         if not result:
             return
         info = info[0]
@@ -208,16 +197,13 @@ class BandDevice:
         self.band_name = bytes_to_text(info[41:73])
         self.band_language = bytes_to_text(info[73:85])
 
-        pyotherside.send("device_name", self.band_name)
-        pyotherside.send("device_language", self.band_language)
-
         return {
             "name": self.band_name,
             "language": self.band_language
         }
 
     def request_tiles(self):
-        result, tiles = self.send_for_result(GET_TILES_NO_IMAGES)
+        result, tiles = self.cargo.send_for_result(GET_TILES_NO_IMAGES)
         tile_data = b"".join(tiles)
 
         tile_list = []
@@ -246,30 +232,16 @@ class BandDevice:
             begin += 88
         self.tiles = tile_list
 
-    def call_notification(self, title, text):
-        self.send_notification(title, text, CALLS,
-                               flags=NOTIFICATION_TYPES["Messaging"])
-
-    def sms_notification(self, title, text):
-        self.send_notification(title, text, SMS, 
-                               flags=NOTIFICATION_TYPES["Messaging"])
-
-    def mail_notification(self, title, text):
-        flags = NOTIFICATION_TYPES["Email"]
-        self.send_notification(title, text, EMAIL, 
-                               flags=NOTIFICATION_TYPES["Messaging"])
-
-    def regular_notification(self, title, text):
-        self.send_notification(title, text, FEED)
-
-    def messenger_notification(self, title, text):
-        self.send_notification(title, text, FBMESSENGER)
-
-    def send_notification(self, title, text, guid=None, 
+    def send_notification(self, title, text, guid=None,
                           flags=NOTIFICATION_TYPES["Messaging"]):
         if not guid:
-            print("GUID not provided")
             return
+
+        if not isinstance(guid, uuid.UUID):
+            guid = uuid.UUID(guid)
+
+        if isinstance(flags, int):
+            flags = struct.pack("H", flags)
 
         notification = flags + guid.bytes_le
         notification += struct.pack("H", len(title)*2)
@@ -280,56 +252,12 @@ class BandDevice:
         notification += struct.pack("<Qxx", timestamp)
         notification += serialize_text(title+text)
 
-        self.send(PUSH_NOTIFICATION + struct.pack("<i", len(notification)))
-        self.send_for_result(notification)
-
-    def send(self, packet):
-        while True:
-            # try to reconnect if failed
-            try:
-                self.cargo.send(packet)
-                break
-            except bluetooth.btcommon.BluetoothError as error:
-                print("Connecting because %s" % error)
-                self.connect()
+        self.cargo.send(
+            PUSH_NOTIFICATION + struct.pack("<i", len(notification)))
+        self.cargo.send_for_result(notification)
 
     def response_result(self, response):
         error_code = struct.unpack("<I", response[2:6])[0]
         if error_code:
-            print("Error: %s" % error_code)
+            self.wrapper.print("Error: %s" % error_code)
         return not error_code
-
-    def receive(self, buffer_size=BUFFER_SIZE):
-        while True:
-            try:
-                result = self.cargo.recv(buffer_size)
-                break
-            except bluetooth.btcommon.BluetoothError as error:
-                print("Connecting because %s" % error)
-                self.connect()
-        return result
-
-    def send_for_result(self, packet, buffer_size=BUFFER_SIZE):
-        results = []
-        success = True
-
-        # send packet
-        self.send(packet)
-
-        while True:
-            self.cargo.settimeout(5.0)
-            result = self.receive(BUFFER_SIZE)
-
-            # check if we got final result
-            if result[0:2] == b'\xfe\xa6':
-                error_code = struct.unpack("<I", result[2:6])[0]
-                if error_code:
-                    print("Error: %s" % error_code)
-                success = not error_code
-                break
-
-            # nope, more data
-            results.append(result)
-
-        # we're done
-        return success, results

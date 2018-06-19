@@ -2,7 +2,6 @@ import struct
 import math
 from copy import deepcopy
 from .helpers import serialize_text
-import pyotherside
 
 ELEMENT_TEXT = 3001
 ELEMENT_ICON = 3101
@@ -25,10 +24,7 @@ class Layout:
         else:
             index = position
 
-        pyotherside.send("Debug", [line, index])
-
         for item in cls.definition.get("items", []):
-
             if item.get("line", 0) == line and item.get("index", 0) == index:
                 return item.get("key", "INVALID")
         return "INVALID"

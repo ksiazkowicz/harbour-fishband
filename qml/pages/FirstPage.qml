@@ -49,6 +49,16 @@ Page {
                 label: "Serial Number"
                 value: bandController.deviceSerialNumber
             }
+
+            SectionHeader { text: "Status" }
+            DetailItem {
+                label: "Cargo Service"
+                value: bandController.cargoServiceStatus
+            }
+            DetailItem {
+                label: "Push Service"
+                value: bandController.pushServiceStatus
+            }
         }
     }
 }

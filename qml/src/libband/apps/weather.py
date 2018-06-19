@@ -4,11 +4,11 @@ import struct
 import requests
 import geocoder
 from datetime import datetime, timedelta
-from . import NOTIFICATION_TYPES
-from . import layouts
-from .tiles import WEATHER
-from .commands import PUSH_NOTIFICATION
-import pyotherside
+from libband import NOTIFICATION_TYPES
+from libband import layouts
+from libband.tiles import WEATHER
+from libband.commands import PUSH_NOTIFICATION
+from .app import App
 
 
 PAGE_IDS = [
@@ -44,23 +44,16 @@ ICON_MAP = {
 }
 
 
-class WeatherService:
-    band = None
+class WeatherService(App):
+    app_name = "Weather Service"
+    guid = WEATHER
+
     lat = 0
     lon = 0
     last_update = None
     days = 6
     units = "C"
     place = "TODO: add geocoding"
-
-    def __init__(self, band):
-        self.band = band
-
-    def __str__(self):
-        return "Weather Service"
-    
-    def __unicode__(self):
-        return "Weather Service"
 
     def set_location(self, lon, lat):
         self.lat = lat
@@ -75,7 +68,6 @@ class WeatherService:
               ",%s?days=%s&units=%s&appid=3FB8A36C-B005-4332-96F1-CAFA" \
               "D7A25D2C&formcode=KAPP" % (
                       self.lat, self.lon, self.days, self.units)
-        pyotherside.send("ForecastDebug", [self.lat, self.lon, self.place])
         response = requests.get(url)
 
         try:
@@ -112,10 +104,10 @@ class WeatherService:
             "largeIcon": ICON_MAP.get(now_icon, now_icon),
             "metric": "%d" % current.get("temp", 0) + "\xb0",
         }]
-        pyotherside.send("Debug", [now_icon, str(type(now_icon))])
+        self.band.wrapper.send("Debug", [now_icon, str(type(now_icon))])
         now = datetime.now()
 
-        pyotherside.send("Debug", [(x.get("icon"), x.get("cap", "")) for x in forecasts])
+        self.band.wrapper.send("Debug", [(x.get("icon"), x.get("cap", "")) for x in forecasts])
 
         weather_args += [{
             "header": (now + timedelta(days=i)).strftime("%A") if i > 0 else "Today",
@@ -134,7 +126,7 @@ class WeatherService:
         success = False
         for forecast in forecasts:
             packet = update_prefix + forecast
-            self.band.send(
+            self.band.cargo.send(
                 PUSH_NOTIFICATION + struct.pack("<i", len(packet)))
-            success, result = self.band.send_for_result(packet)
+            success, result = self.band.cargo.send_for_result(packet)
         return success

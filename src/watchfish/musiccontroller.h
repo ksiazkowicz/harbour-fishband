@@ -37,6 +37,7 @@ class MusicController : public QObject
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
     Q_PROPERTY(QString artist READ artist NOTIFY artistChanged)
     Q_PROPERTY(QString album READ album NOTIFY albumChanged)
+    Q_PROPERTY(Status status READ status NOTIFY statusChanged)
 	Q_ENUMS(Status)
 
 public:

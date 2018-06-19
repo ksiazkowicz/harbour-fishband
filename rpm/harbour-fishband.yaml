@@ -25,10 +25,12 @@ PkgConfigBR:
   - Qt5Core
   - Qt5Qml
   - Qt5Quick
+  - Qt5Contacts
+  - mpris-qt5
 
 # Build dependencies without a pkgconfig setup can be listed here
 # PkgBR:
-#   - package-needed-to-build
+#   - mpris-qt5
 
 # Runtime dependencies which are not automatically detected
 Requires:

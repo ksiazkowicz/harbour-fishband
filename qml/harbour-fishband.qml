@@ -30,28 +30,16 @@
 
 import QtQuick 2.0
 import Sailfish.Silica 1.0
-import io.thp.pyotherside 1.4
-import QtPositioning 5.2
-import Nemo.Configuration 1.0
 import watchfish 1.0
+import "apps"
 import "pages"
+import "."
 
 ApplicationWindow
 {
     id: application
     initialPage: Component { FirstPage { } }
     cover: Qt.resolvedUrl("cover/CoverPage.qml")
-
-    PositionSource {
-        id: gps
-        updateInterval: 500000
-        active: true
-        onPositionChanged: {
-            if (position.latitudeValid && position.longitudeValid)
-                gps.stop()
-            console.log(position.coordinate)
-        }
-    }
 
     NotificationMonitor {
         id: monitor
@@ -73,41 +61,42 @@ ApplicationWindow
 
             // check if is SMS
             if (notification.category === "x-nemo.messaging.sms.preview") {
-                bandController.smsNotification(summary, body)
+                bandController.sendNotification(
+                            summary, body, BandConstants.smsApp,
+                            BandConstants.flagMessaging)
                 return;
             }
 
             // check if is email
             if (notification.category === "x-nemo.email") {
-                bandController.mailNotification(summary, body)
+                bandController.sendNotification(
+                            summary, body, BandConstants.mailApp,
+                            BandConstants.flagMessaging)
                 return;
             }
 
             // check if is messenger
             if (notification.owner === "aliendalvik") {
                 if (notification.originPackage === "com.facebook.orca")
-                    bandController.messengerNotification(summary, body)
+                    bandController.sendNotification(
+                                summary, body, BandConstants.messengerApp,
+                                BandConstants.flagMessaging)
                     return;
             }
 
             // push notification
-            bandController.regularNotification(summary, body)
+            bandController.sendNotification(
+                        summary, body, BandConstants.feedApp,
+                        BandConstants.flagMessaging)
         }
     }
 
-    MusicController {
-        id: musicController
-        onMetadataChanged: bandController.updateMusicTile(title, artist, album)
-    }
+    MusicApp {}
+    PhoneApp {}
+    WeatherApp {}
 
     BandController {
         id: bandController
-        onMusicControlNext: musicController.next();
-        onMusicControlPlay: musicController.playPause();
-        onMusicControlPrev: musicController.previous();
-        onMusicControlVolDown: musicController.volumeDown();
-        onMusicControlVolUp: musicController.volumeUp();
-
     }
 }
 
