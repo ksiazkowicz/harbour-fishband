@@ -12,7 +12,8 @@ FACILITIES = {
     "ModuleOobe": b'\xAD',
     "ModuleProfile": b'\xc5',
     "ModuleThemeColor": b'\xd8',
-    "ModuleFireballUI": b'\xC3'
+    "ModuleFireballUI": b'\xC3',
+    "ModulePersistedStatistics": b'\xCE',
 }
 
 
@@ -76,3 +77,7 @@ OOBE_GET_STAGE = make_command(
     FACILITIES["ModuleOobe"], True, 1)
 OOBE_FINALIZE = make_command(
     FACILITIES["ModuleOobe"], False, 2)
+
+# ModulePersistedStatistics
+GET_STATISTICS_SLEEP = make_command(
+    FACILITIES["ModulePersistedStatistics"], True, 4) + struct.pack("<I", 54)
