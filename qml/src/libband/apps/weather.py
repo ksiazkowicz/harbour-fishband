@@ -36,6 +36,7 @@ ICON_MAP = {
     5: 2,   # Cloudy
     19: 3,  # Light Rain
     20: 6,  # Light Snow
+    22: 3,  # Rain
     23: 3,  # Rain Showers
     24: 0,  # Mostly Sunny
     27: 4,  # Storms
@@ -55,7 +56,7 @@ class WeatherService(App):
     units = "C"
     place = "TODO: add geocoding"
 
-    def set_location(self, lon, lat):
+    def set_location(self, lat, lon):
         self.lat = lat
         self.lon = lon
         place = geocoder.opencage([lat, lon],

@@ -14,7 +14,6 @@ App {
                 position.coordinate.latitude, position.coordinate.longitude
             ])
             return true;
-            console.log("Position updated")
         }
     }
 
