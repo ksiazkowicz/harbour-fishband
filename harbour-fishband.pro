@@ -42,4 +42,7 @@ DISTFILES += \
     qml/apps/MusicApp.qml \
     qml/apps/App.qml \
     qml/apps/PhoneApp.qml \
-    qml/apps/WeatherApp.qml
+    qml/apps/WeatherApp.qml \
+    qml/apps/FeedApp.qml \
+    qml/pages/DevicePage.qml \
+    qml/delegates/HomeInfoDelegate.qml

@@ -4,16 +4,23 @@ import ".."
 
 
 App {
+    property int callId: 5
+    property bool answered: false
     guid: BandConstants.phoneApp
     onPushReceived: {
-        if (message.command === "hangup")
-            callManager.activeVoiceCall.hangup()
+        if (message.command === "reply") {
+            console.log("TODO: Send SMS to " + message.call_id + ": " + message.text)
+        }
     }
 
     VoiceCallManager {
         id: callManager
         onActiveVoiceCallChanged: {
             if (activeVoiceCall) {
+                // increment call ID
+                callId += 1;
+                answered = false;
+
                 // process only incoming calls
                 if (activeVoiceCall.status !== 5)
                     return;
@@ -29,15 +36,19 @@ App {
                 }
 
                 // send notification
-                bandController.sendNotification(
-                            person, "Incoming Call", BandConstants.phoneApp,
-                            BandConstants.flagMessaging)
-                /*activeVoiceCall.statusChanged.connect(function () {
-                    console.log(handlerId)
-                    console.log(providerId)
-                    console.log(status)
-                    console.log(statusText)
-                })*/
+                bandController.callNotification(callId,
+                            person, BandConstants.phoneApp,
+                            BandConstants.flagIncomingCall)
+                activeVoiceCall.statusChanged.connect(function () {
+                    if (activeVoiceCall.status == 1)
+                        answered = true;
+
+                    if (activeVoiceCall.status == 7 && !answered) {
+                        bandController.callNotification(callId,
+                                    person, BandConstants.phoneApp,
+                                    BandConstants.flagMissedCall)
+                    }
+                })
             }
         }
     }

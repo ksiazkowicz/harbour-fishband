@@ -4,15 +4,16 @@ import binascii
 import uuid
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .helpers import serialize_text, bytes_to_text
 from .commands import SERIAL_NUMBER_REQUEST, PUSH_NOTIFICATION, \
                       GET_TILES_NO_IMAGES, PROFILE_GET_DATA_APP, \
                       SET_THEME_COLOR, START_STRIP_SYNC_END, \
                       START_STRIP_SYNC_START, READ_ME_TILE_IMAGE, \
-                      WRITE_ME_TILE_IMAGE_WITH_ID, SUBSCRIBE
-from .filetimes import convert_back
+                      WRITE_ME_TILE_IMAGE_WITH_ID, SUBSCRIBE, \
+                      GET_STATISTICS_SLEEP
+from .filetimes import convert_back, get_time
 from .tiles import CALLS
 from .socket import BandSocket
 from . import PUSH_SERVICE_PORT, NOTIFICATION_TYPES, layouts
@@ -104,7 +105,7 @@ class BandDevice:
     def process_notification_callback(self, result):
         opcode = struct.unpack("I", result[2:6])[0]
         guid = uuid.UUID(bytes_le=result[6:22])
-        command = result[22:44]
+        command = result[22:]
 
         message = {
             "opcode": opcode,
@@ -119,31 +120,98 @@ class BandDevice:
         self.push.connect()
         while True:
             result = self.push.receive()
-
-            self.wrapper.print(binascii.hexlify(result))
-
             packet_type = struct.unpack("H", result[0:2])[0]
             self.wrapper.print(packet_type)
 
             if packet_type == 1:
                 # sensor data
-                nie_wiem = struct.unpack("L", result[2:6])
-                subscription_type = struct.unpack("H", result[6:8])
-                missed_samples = struct.unpack("H", result[8:10])
-                data_length = struct.unpack("L", result[10:14])
-                self.wrapper.print(nie_wiem, subscription_type, missed_samples, data_length)
+                packet_length = struct.unpack("L", result[2:6])[0]
+                subscription_type = struct.unpack("B", result[6:7])[0]
+                missed_samples = struct.unpack("B", result[7:8])[0]
+                sample_size = struct.unpack("H", result[9:11])[0]
+
+                if subscription_type == 16:
+                    # Heart Rate sensor
+                    value = result[11]
+                    quality = result[12] >= 6
+                    self.wrapper.print("Heart Rate: %d (%s)" % (
+                        value, "Locked" if quality else "Acquiring"))
+                elif subscription_type == 19:
+                    # Pedometer
+                    value = struct.unpack("L", result[11:15])
+                    self.wrapper.print("Pedometer: %d" % value)
+                elif subscription_type == 35:
+                    # Device Contact sensor
+                    value = result[11]
+                    self.wrapper.print("Device Contact: %s" % ("True" if value else "False"))
+                elif subscription_type == 38:
+                    # Battery Gauge
+                    percent_charge = result[11]
+                    filtered_voltage = struct.unpack("H", result[11:13])[0]
+                    battery_gauge_alerts = struct.unpack("H", result[13:15])[0]
+
+                    percent = (percent_charge / 10)*10
+                    if percent > 100:
+                        percent = 100
+
+                    self.wrapper.send("Sensor::Battery", percent)
+                    self.wrapper.print("Battery Gauge: %d | Filtered Voltage: %s | Alerts: %s" % (
+                        percent_charge, filtered_voltage, battery_gauge_alerts))
+                else:
+                    self.wrapper.print(binascii.hexlify(result))
+                    self.wrapper.print(subscription_type, missed_samples, sample_size)
+            elif packet_type == 100:
+                self.process_notification_callback(result)
             elif packet_type == 101:
                 self.process_notification_callback(result)
             elif packet_type == 204:
+                self.wrapper.print(binascii.hexlify(result))
                 self.process_tile_callback(result)
             else:
+                self.wrapper.print(packet_type)
                 self.wrapper.print(binascii.hexlify(result))
 
     def subscribe(self, subscription_type):
-        command = SUBSCRIBE + b"\x00"*4 + struct.pack("L", subscription_type) + b"\x00"
-        self.wrapper.print(binascii.hexlify(command))
+        command = SUBSCRIBE + b"\x00"*4 + struct.pack("L", subscription_type) + struct.pack("L", 0) # b"\x00"
         result = self.cargo.send_for_result(command)
+
+    def format_time_sleep(self, timesleep):
+        hours = float(timesleep)/float(3600000)
+        hours_int = int(hours)
+        minutes = int((hours - hours_int)*60)
+        return "%d:%d" % (hours_int, minutes)
+
+    def get_sleep_metrics(self):
+        result, metrics = self.cargo.send_for_result(GET_STATISTICS_SLEEP)
+        data = b"".join(metrics)
         self.wrapper.print(result)
+        self.wrapper.print(binascii.hexlify(data))
+
+        timestamp = get_time(struct.unpack("Q", data[:8])[0])
+        version = struct.unpack("H", data[8:10])[0]
+        duration = struct.unpack("L", data[10:14])[0]
+        times_woke_up = struct.unpack("L", data[14:18])[0]
+        time_awake = struct.unpack("L", data[18:22])[0]
+        time_asleep = struct.unpack("L", data[22:26])[0]
+        calories_burned = struct.unpack("L", data[26:30])[0]
+        resting_heart_rate = struct.unpack("L", data[30:34])[0]
+        end_time = get_time(struct.unpack("Q", data[38:46])[0])
+        time_to_fall_asleep = struct.unpack("L", data[46:50])[0]
+        feeling = struct.unpack("L", data[50:54])[0]
+
+        self.wrapper.send("Stats::Sleep", {
+            "duration": self.format_time_sleep(duration),
+            "times_woke_up": times_woke_up,
+            "time_awake": self.format_time_sleep(time_awake),
+            "time_asleep": self.format_time_sleep(time_asleep),
+            "calories_burned": calories_burned,
+            "resting_heart_rate": 53,
+            "start_time": end_time - timedelta(milliseconds=duration),
+            "end_time": end_time,
+            "time_to_fall_asleep": self.format_time_sleep(time_to_fall_asleep),
+            "feeling": feeling,
+        })
+
 
     def sync(self):
         for service in self.services.values():
@@ -153,6 +221,9 @@ class BandDevice:
             except:
                 result = False
             self.wrapper.print("          [%s]" % ("OK" if result else "FAIL"))
+
+        # get metrics
+        self.get_sleep_metrics()
 
         self.wrapper.print("Sync finished")
 
@@ -232,6 +303,32 @@ class BandDevice:
             begin += 88
         self.tiles = tile_list
 
+    def call_notification(self, call_id, caller, guid=None,
+                          flags=NOTIFICATION_TYPES["IncomingCall"]):
+        if not guid:
+            return
+        if not isinstance(guid, uuid.UUID):
+            guid = uuid.UUID(guid)
+        if isinstance(flags, int):
+            flags = struct.pack("H", flags)
+
+        caller = caller[:20]
+
+        notification = flags + guid.bytes_le
+        notification += struct.pack("H", len(caller)*2)
+        notification += struct.pack("L", call_id)
+        timestamp_string = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        timestamp = convert_back(timestamp_string)
+
+        notification += struct.pack("<Qxx", timestamp)
+        notification += serialize_text(caller)
+
+        self.cargo.send(
+            PUSH_NOTIFICATION + struct.pack("<i", len(notification)))
+        self.wrapper.print(binascii.hexlify(notification))
+
+        self.cargo.send_for_result(notification)
+
     def send_notification(self, title, text, guid=None,
                           flags=NOTIFICATION_TYPES["Messaging"]):
         if not guid:
@@ -242,6 +339,9 @@ class BandDevice:
 
         if isinstance(flags, int):
             flags = struct.pack("H", flags)
+
+        title = title[:20]
+        text = text[:160]
 
         notification = flags + guid.bytes_le
         notification += struct.pack("H", len(title)*2)
