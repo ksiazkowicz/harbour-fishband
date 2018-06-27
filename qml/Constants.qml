@@ -13,4 +13,8 @@ Item {
 
     // Flags
     readonly property int flagMessaging: 18
+    readonly property int flagIncomingCall: 11
+    readonly property int flagAnsweredCall: 12
+    readonly property int flagMissedCall: 13
+    readonly property int flagHangupCall: 14
 }
