@@ -1,5 +1,7 @@
 import QtQuick 2.0
 import Sailfish.Silica 1.0
+import "../delegates"
+import ".."
 
 Page {
     id: page
@@ -36,28 +38,33 @@ Page {
                 title: bandController.deviceName
             }
 
-            SectionHeader { text: "Info" }
-            DetailItem {
-                label: "Last sync"
-                value: bandController.lastSync ? bandController.lastSync.toLocaleString() : "Never"
-            }
-            DetailItem {
-                label: "Language"
-                value: bandController.deviceLanguage
-            }
-            DetailItem {
-                label: "Serial Number"
-                value: bandController.deviceSerialNumber
+            HomeInfoDelegate {
+                icon: "image://theme/icon-l-clock"
+                title: qsTr("Last sync")
+                value: bandController.lastSync ? bandController.lastSync.toLocaleString() : qsTr("Never")
             }
 
-            SectionHeader { text: "Status" }
-            DetailItem {
-                label: "Cargo Service"
+            HomeInfoDelegate {
+                icon: "image://theme/icon-m-moon"
+                title: qsTr("Last sleep: ") + bandController.lastSleepDuration
+                value: bandController.lastSleepDate ? bandController.lastSleepDate.toLocaleString() : "N/A"
+            }
+
+            HomeInfoDelegate {
+                icon: "image://theme/icon-l-battery"
+                title: qsTr("Battery level")
+                value: bandController.batteryGauge ? bandController.batteryGauge + "%" : "N/A"
+            }
+
+            HomeInfoDelegate {
+                icon: "image://theme/icon-l-bluetooth"
+                title: qsTr("Bluetooth status")
                 value: bandController.cargoServiceStatus
             }
-            DetailItem {
-                label: "Push Service"
-                value: bandController.pushServiceStatus
+
+            Button {
+                text: "subs"
+                onClicked: bandController.testSubs()
             }
         }
     }

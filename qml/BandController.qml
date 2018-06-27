@@ -15,6 +15,11 @@ Item {
     property string cargoServiceStatus: "N/A"
     property string pushServiceStatus: "N/A"
 
+    property string batteryGauge: ""
+
+    property alias lastSleepDuration: deviceConf.lastSleepDuration
+    property alias lastSleepDate: deviceConf.lastSleepDate
+
     signal pushServiceReceived(variant message)
     signal interpreterReady
 
@@ -46,6 +51,12 @@ Item {
                     [title, body, tile, flags])
     }
 
+    function callNotification(call_id, caller, tile, flags) {
+        console.log(call_id)
+        python.call("wrapper.app.device.call_notification",
+                    [call_id, caller, tile, flags])
+    }
+
     function setTheme(base, highlight, lowlight, secondaryText, highContrast,
                       muted) {
         python.call("wrapper.app.device.set_theme", [[
@@ -54,8 +65,6 @@ Item {
     }
 
     function testSubs() {
-        python.call("wrapper.app.device.subscribe", [19, ], function() {})
-        python.call("wrapper.app.device.subscribe", [35, ], function() {})
         python.call("wrapper.app.device.subscribe", [38, ], function() {})
     }
 
@@ -67,6 +76,8 @@ Item {
         property string deviceLanguage: "N/A"
         property string deviceSerialNumber: "N/A"
         property date lastSync
+        property string lastSleepDuration: "N/A"
+        property date lastSleepDate
     }
 
     Python {
@@ -94,6 +105,15 @@ Item {
                 console.log("tile name: " + message.tile_name)
             })
 
+            setHandler("Sensor::Battery", function (data) {
+                batteryGauge = data;
+            })
+
+            setHandler("Stats::Sleep", function (message) {
+                bandController.lastSleepDate = message.start_time;
+                bandController.lastSleepDuration = message.time_asleep;
+            })
+
             setHandler("Status", function (data) {
                 var port = data[0];
                 var message = data[1];
@@ -102,6 +122,11 @@ Item {
                 case 4:
                     if (message === "Disconnected")
                         isSyncing = false;
+                    if (message === "Connected") {
+                        // subscribe battery gauge
+                        // python.call("wrapper.app.device.subscribe", [38, ], function() {})
+                    }
+
                     cargoServiceStatus = message;
                     break;
                 case 5:

@@ -41,6 +41,8 @@ ApplicationWindow
     initialPage: Component { FirstPage { } }
     cover: Qt.resolvedUrl("cover/CoverPage.qml")
 
+    Component.onCompleted: pageStack.pushAttached(Qt.resolvedUrl("pages/DevicePage.qml"))
+
     NotificationMonitor {
         id: monitor
         property variant blacklist: ["store-client", "com.spotify.music"]
