@@ -18,7 +18,13 @@ Item {
     property string batteryGauge: ""
 
     property alias lastSleepDuration: deviceConf.lastSleepDuration
+    property alias lastSleepCalories: deviceConf.lastSleepCalories
+    property alias lastSleepHeartRate: deviceConf.lastSleepHeartRate
     property alias lastSleepDate: deviceConf.lastSleepDate
+    property alias lastWorkoutDuration: deviceConf.lastWorkoutDuration
+    property alias lastWorkoutDate: deviceConf.lastWorkoutDate
+    property alias lastWorkoutCalories: deviceConf.lastWorkoutCalories
+    property alias lastWorkoutAvgHeartrate: deviceConf.lastWorkoutAvgHeartrate
 
     signal pushServiceReceived(variant message)
     signal interpreterReady
@@ -77,7 +83,14 @@ Item {
         property string deviceSerialNumber: "N/A"
         property date lastSync
         property string lastSleepDuration: "N/A"
+        property string lastSleepCalories: "-"
+        property string lastSleepHeartRate: "-"
         property date lastSleepDate
+        property string lastWorkoutDuration: "N/A"
+        property date lastWorkoutDate
+        property string lastWorkoutCalories: "-"
+        property string lastWorkoutAvgHeartrate: "-"
+        property string lastWorkoutFeeling: "-"
     }
 
     Python {
@@ -111,7 +124,16 @@ Item {
 
             setHandler("Stats::Sleep", function (message) {
                 bandController.lastSleepDate = message.start_time;
+                bandController.lastSleepCalories = message.calories_burned;
                 bandController.lastSleepDuration = message.time_asleep;
+                bandController.lastSleepHeartRate = message.resting_heart_rate;
+            })
+
+            setHandler("Stats::Workout", function (message) {
+                bandController.lastWorkoutDate = message.start_time;
+                bandController.lastWorkoutCalories = message.calories_burned;
+                bandController.lastWorkoutDuration = message.duration;
+                bandController.lastWorkoutAvgHeartrate = message.avg_heartrate;
             })
 
             setHandler("Status", function (data) {

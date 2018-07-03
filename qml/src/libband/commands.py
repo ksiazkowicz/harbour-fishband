@@ -79,5 +79,11 @@ OOBE_FINALIZE = make_command(
     FACILITIES["ModuleOobe"], False, 2)
 
 # ModulePersistedStatistics
+GET_STATISTICS_RUN = make_command(
+    FACILITIES["ModulePersistedStatistics"], True, 2)
+GET_STATISTICS_WORKOUT = make_command(
+    FACILITIES["ModulePersistedStatistics"], True, 3)
 GET_STATISTICS_SLEEP = make_command(
-    FACILITIES["ModulePersistedStatistics"], True, 4) + struct.pack("<I", 54)
+    FACILITIES["ModulePersistedStatistics"], True, 4)
+GET_STATISTICS_GUIDED_WORKOUT = make_command(
+    FACILITIES["ModulePersistedStatistics"], True, 5)

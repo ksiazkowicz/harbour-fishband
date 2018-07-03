@@ -46,8 +46,14 @@ Page {
 
             HomeInfoDelegate {
                 icon: "image://theme/icon-m-moon"
-                title: qsTr("Last sleep: ") + bandController.lastSleepDuration
+                title: qsTr("Last sleep: ") + bandController.lastSleepDuration + " | 🔥 " + bandController.lastSleepCalories + " | 💓 " + bandController.lastSleepHeartRate
                 value: bandController.lastSleepDate ? bandController.lastSleepDate.toLocaleString() : "N/A"
+            }
+
+            HomeInfoDelegate {
+                icon: "image://theme/icon-l-timer"
+                title: qsTr("Last workout: ") + bandController.lastWorkoutDuration + " | 🔥 " + bandController.lastWorkoutCalories + " | 💓 " + bandController.lastWorkoutAvgHeartrate
+                value: bandController.lastWorkoutDate ? bandController.lastWorkoutDate.toLocaleString() : "N/A"
             }
 
             HomeInfoDelegate {
