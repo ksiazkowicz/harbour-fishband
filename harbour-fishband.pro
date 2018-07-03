@@ -29,10 +29,11 @@ OTHER_FILES += qml/harbour-fishband.qml \
     qml/pages/FirstPage.qml \
     rpm/* \
     harbour-fishband.desktop \
-    qml/pages/datadownloader.py \
     qml/src/wrapper.py \
     qml/src/libband/* \
-    qml/src/notifications/*
+    qml/src/bluetooth/* \
+    qml/src/requests/* \
+    qml/src/unidecode/*
 
 DISTFILES += \
     qml/pages/ThemePage.qml \
