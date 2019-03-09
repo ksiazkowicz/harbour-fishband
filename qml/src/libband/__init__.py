@@ -1,5 +1,3 @@
-import uuid
-
 CARGO_SERVICE_PORT = 4
 PUSH_SERVICE_PORT = 5
 

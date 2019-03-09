@@ -41,7 +41,8 @@ ICON_MAP = {
     24: 0,  # Mostly Sunny
     27: 4,  # Storms
     28: 1,  # Clear
-    29: 1,  # Mostly Clear
+    29: 1,  # Mostly Clear,
+    31: 2,  # Mostly Cloudy
 }
 
 
@@ -66,8 +67,7 @@ class WeatherService(App):
 
     def sync(self):
         url = "http://service.weather.microsoft.com/weather/summary/%s" \
-              ",%s?days=%s&units=%s&appid=3FB8A36C-B005-4332-96F1-CAFA" \
-              "D7A25D2C&formcode=KAPP" % (
+              ",%s?days=%s&units=%s" % (
                       self.lat, self.lon, self.days, self.units)
         response = requests.get(url)
 

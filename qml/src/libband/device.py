@@ -1,41 +1,21 @@
 from __future__ import print_function
+from enum import IntEnum
 import struct
 import binascii
 import uuid
-import json
 import threading
-from datetime import datetime, timedelta
 
-from .helpers import serialize_text, bytes_to_text
-from .commands import SERIAL_NUMBER_REQUEST, PUSH_NOTIFICATION, \
-                      GET_TILES_NO_IMAGES, PROFILE_GET_DATA_APP, \
+from .notifications import NotificationTypes, GenericClearTileNotification
+from .parser import MsftBandParser
+from .commands import SERIAL_NUMBER_REQUEST, CARGO_NOTIFICATION, \
+                      GET_TILES_NO_IMAGES, CORE_WHO_AM_I, \
                       SET_THEME_COLOR, START_STRIP_SYNC_END, \
                       START_STRIP_SYNC_START, READ_ME_TILE_IMAGE, \
                       WRITE_ME_TILE_IMAGE_WITH_ID, SUBSCRIBE, \
-                      GET_STATISTICS_WORKOUT, GET_STATISTICS_SLEEP, \
-                      GET_STATISTICS_RUN, GET_STATISTICS_GUIDED_WORKOUT
-from .filetimes import convert_back, get_time
-from .tiles import CALLS
+                      CARGO_SYSTEM_SETTINGS_OOBE_COMPLETED_GET, \
+                      NAVIGATE_TO_SCREEN, GET_ME_TILE_IMAGE_ID
 from .socket import BandSocket
-from . import PUSH_SERVICE_PORT, NOTIFICATION_TYPES, layouts
-
-
-def decode_color(color):
-    return {
-        "r": color >> 16 & 255,
-        "g": color >> 8 & 255,
-        "b": color & 255
-    }
-
-
-def cuint32_to_hex(color):
-    return "#{0:02x}{1:02x}{2:02x}".format(color >> 16 & 255, 
-                                           color >> 8 & 255, 
-                                           color & 255)
-
-
-def encode_color(alpha, r, g, b):
-    return (alpha << 24 | r << 16 | g << 8 | b)
+from . import PUSH_SERVICE_PORT, layouts
 
 
 class DummyWrapper:
@@ -50,11 +30,24 @@ class DummyWrapper:
         atexit.register(func)
 
 
+class BandType(IntEnum):
+    """
+    MSFT Band device types
+    
+    Cargo - MSFT Band 1
+    Envoy - MSFT Band 2
+    """
+    Unknown = 0
+    Cargo = 1
+    Envoy = 2
+
+
 class BandDevice:
     address = ""
     cargo = None
     push = None
     tiles = None
+    band_type = BandType.Cargo  # TODO: actually detect this from Device
     band_language = None
     band_name = None
     serial_number = None
@@ -79,6 +72,55 @@ class BandDevice:
         self.push.disconnect()
         self.cargo.disconnect()
 
+    def who_am_i(self):
+        return self.cargo.cargo_read(CORE_WHO_AM_I, 1)
+
+    def check_if_oobe_completed(self):
+        result, data = self.cargo.cargo_read(
+            CARGO_SYSTEM_SETTINGS_OOBE_COMPLETED_GET, 4)
+        if data:
+            return struct.unpack("<I", data[0])[0] != 0
+        return False
+
+    def get_me_tile_image_id(self):
+        result, data = self.cargo.cargo_read(GET_ME_TILE_IMAGE_ID, 4)
+        if data:
+            return data[0]
+        return 0
+
+    def get_me_tile_image(self):
+        """
+        Sends READ_ME_TILE_IMAGE command to device and returns a bgr565
+        byte array with Me tile image
+        """
+        # calculate byte count based on device type
+        if self.band_type == BandType.Cargo:
+            byte_count = 310 * 102 * 2
+        elif self.band_type == BandType.Envoy:
+            byte_count = 310 * 128 * 2
+        else:
+            byte_count = 0
+
+        # read Me Tile image
+        result, data = self.cargo.cargo_read(READ_ME_TILE_IMAGE, byte_count)
+        pixel_data = b''.join(data)
+        return pixel_data
+
+    def set_me_tile_image(self, pixel_data, image_id):
+        result, data = self.cargo.cargo_write_with_data(
+            WRITE_ME_TILE_IMAGE_WITH_ID,
+            pixel_data,
+            struct.pack("<I", image_id))
+        return result, data
+
+    def navigate_to_screen(self, screen):
+        """
+        Tells the device to navigate to a given screen.
+        AFAIK works only with OOBE screens in OOBE mode
+        """
+        return self.cargo.cargo_write_with_data(
+            NAVIGATE_TO_SCREEN, struct.pack("<H", screen))
+
     def process_push(self, guid, command, message):
         for service in self.services.values():
             if service.guid == guid:
@@ -92,7 +134,7 @@ class BandDevice:
         opcode = struct.unpack("I", result[6:10])[0]
         guid = uuid.UUID(bytes_le=result[10:26])
         command = result[26:44]
-        tile_name = bytes_to_text(result[44:84])
+        tile_name = MsftBandParser.bytes_to_text(result[44:84])
 
         message = {
             "opcode": opcode,
@@ -176,116 +218,6 @@ class BandDevice:
         command = SUBSCRIBE + b"\x00"*4 + struct.pack("L", subscription_type) + struct.pack("L", 0) # b"\x00"
         result = self.cargo.send_for_result(command)
 
-    def format_time_sleep(self, timesleep):
-        hours = float(timesleep)/float(3600000)
-        hours_int = int(hours)
-        minutes = int((hours - hours_int)*60)
-        return "%d:%02d" % (hours_int, minutes)
-
-    def deserialize_time(self, band_time):
-        if band_time <= 2650467743999990000:
-            return get_time(band_time)
-        return get_time(2650467743999990000)
-
-    def get_workout_statistics(self):
-        result, metrics = self.cargo.send_for_result(
-            GET_STATISTICS_WORKOUT + struct.pack("I", 38))
-
-        if not result:
-            self.wrapper.print("Error occurred")
-            return
-
-        data = b"".join(metrics)
-
-        timestamp = self.deserialize_time(struct.unpack("Q", data[:8])[0])
-        version = struct.unpack("H", data[8:10])[0]
-        duration = struct.unpack("L", data[10:14])[0]
-        calories_burned = struct.unpack("L", data[14:18])[0]
-        avg_heartrate = struct.unpack("L", data[18:22])[0]
-        max_heartrate = struct.unpack("L", data[22:26])[0]
-        end_time = self.deserialize_time(struct.unpack("Q", data[26:34])[0])
-        feeling = struct.unpack("L", data[34:38])[0]
-
-        self.wrapper.send("Stats::Workout", {
-            "timestamp": timestamp,
-            "version": version,
-            "duration": self.format_time_sleep(duration),
-            "calories_burned": calories_burned,
-            "avg_heartrate": avg_heartrate,
-            "max_heartrate": max_heartrate,
-            "start_time": end_time - timedelta(milliseconds=duration),
-            "end_time": end_time,
-            "feeling": feeling,
-        })
-
-    def get_guided_workout_statistics(self):
-        result, metrics = self.cargo.send_for_result(
-            GET_STATISTICS_GUIDED_WORKOUT + struct.pack("I", 38))
-
-        if not result:
-            self.wrapper.print("Error occurred")
-            return
-
-        data = b"".join(metrics)
-
-        timestamp = self.deserialize_time(struct.unpack("Q", data[:8])[0])
-        version = struct.unpack("H", data[8:10])[0]
-        duration = struct.unpack("L", data[10:14])[0]
-        calories_burned = struct.unpack("L", data[14:18])[0]
-        avg_heartrate = struct.unpack("L", data[18:22])[0]
-        max_heartrate = struct.unpack("L", data[22:26])[0]
-        end_time = self.deserialize_time(struct.unpack("Q", data[26:34])[0])
-        rounds_completed = struct.unpack("L", data[34:38])[0]
-
-        self.wrapper.send("Stats::GuidedWorkout", {
-            "timestamp": timestamp,
-            "version": version,
-            "duration": self.format_time_sleep(duration),
-            "calories_burned": calories_burned,
-            "avg_heartrate": avg_heartrate,
-            "max_heartrate": max_heartrate,
-            "start_time": end_time - timedelta(milliseconds=duration),
-            "end_time": end_time,
-            "rounds_completed": rounds_completed,
-        })
-
-    def get_sleep_metrics(self):
-        result, metrics = self.cargo.send_for_result(
-            GET_STATISTICS_SLEEP + struct.pack("I", 54))
-
-        if not result:
-            self.wrapper.print("Error occurred")
-            return
-
-        data = b"".join(metrics)
-
-        timestamp = self.deserialize_time(struct.unpack("Q", data[:8])[0])
-        version = struct.unpack("H", data[8:10])[0]
-        duration = struct.unpack("L", data[10:14])[0]
-        times_woke_up = struct.unpack("L", data[14:18])[0]
-        time_awake = struct.unpack("L", data[18:22])[0]
-        time_asleep = struct.unpack("L", data[22:26])[0]
-        calories_burned = struct.unpack("L", data[26:30])[0]
-        resting_heart_rate = struct.unpack("L", data[30:34])[0]
-        end_time = self.deserialize_time(struct.unpack("Q", data[38:46])[0])
-        time_to_fall_asleep = struct.unpack("L", data[46:50])[0]
-        feeling = struct.unpack("L", data[50:54])[0]
-
-        self.wrapper.send("Stats::Sleep", {
-            "timestamp": timestamp,
-            "version": version,
-            "duration": self.format_time_sleep(duration),
-            "times_woke_up": times_woke_up,
-            "time_awake": self.format_time_sleep(time_awake),
-            "time_asleep": self.format_time_sleep(time_asleep),
-            "calories_burned": calories_burned,
-            "resting_heart_rate": resting_heart_rate,
-            "start_time": end_time - timedelta(milliseconds=duration),
-            "end_time": end_time,
-            "time_to_fall_asleep": self.format_time_sleep(time_to_fall_asleep),
-            "feeling": feeling,
-        })
-
     def sync(self):
         for service in self.services.values():
             self.wrapper.print("%s" % service, end='')
@@ -295,29 +227,10 @@ class BandDevice:
                 result = False
             self.wrapper.print("          [%s]" % ("OK" if result else "FAIL"))
 
-        # get metrics
-        try:
-            self.get_sleep_metrics()
-        except:
-            pass
-        try:
-            self.get_workout_statistics()
-        except:
-            pass
-        try:
-            self.get_guided_workout_statistics()
-        except:
-            # we get bullshit if there was no workout
-            pass
-
         self.wrapper.print("Sync finished")
 
     def clear_tile(self, guid):
-        notification = NOTIFICATION_TYPES["GenericClearTile"]
-        notification += guid.bytes_le
-        self.cargo.send(
-            PUSH_NOTIFICATION + struct.pack("<i", len(notification)))
-        self.cargo.send_for_result(notification)
+        self.send_notification(GenericClearTileNotification(guid))
 
     def set_theme(self, colors):
         """
@@ -326,9 +239,8 @@ class BandDevice:
         Base, Highlight, Lowlight, SecondaryText, HighContrast, Muted
         """
         self.cargo.send_for_result(START_STRIP_SYNC_START)
-        self.cargo.send(SET_THEME_COLOR)
         colors = struct.pack("I"*6, *[int(x) for x in colors])
-        self.cargo.send_for_result(colors)
+        self.cargo.cargo_write_with_data(SET_THEME_COLOR, colors)
         self.cargo.send_for_result(START_STRIP_SYNC_END)
 
     def get_tiles(self):
@@ -339,24 +251,10 @@ class BandDevice:
     def get_serial_number(self):
         if not self.serial_number:
             # ask nicely for serial number
-            result, number = self.cargo.send_for_result(SERIAL_NUMBER_REQUEST)
+            result, number = self.cargo.cargo_read(SERIAL_NUMBER_REQUEST, 12)
             if result:
                 self.serial_number = number[0].decode("utf-8")
         return self.serial_number
-
-    def get_device_info(self):
-        result, info = self.cargo.send_for_result(PROFILE_GET_DATA_APP)
-        if not result:
-            return
-        info = info[0]
-
-        self.band_name = bytes_to_text(info[41:73])
-        self.band_language = bytes_to_text(info[73:85])
-
-        return {
-            "name": self.band_name,
-            "language": self.band_language
-        }
 
     def request_tiles(self):
         result, tiles = self.cargo.send_for_result(GET_TILES_NO_IMAGES)
@@ -374,7 +272,7 @@ class BandDevice:
             icon = tile_data[begin+16:begin+16+12]
 
             # get tile name
-            name = bytes_to_text(tile_data[begin+28:begin+80])
+            name = MsftBandParser.bytes_to_text(tile_data[begin+28:begin+80])
 
             # append tile to list
             tile_list.append({
@@ -388,61 +286,6 @@ class BandDevice:
             begin += 88
         self.tiles = tile_list
 
-    def call_notification(self, call_id, caller, guid=None,
-                          flags=NOTIFICATION_TYPES["IncomingCall"]):
-        if not guid:
-            return
-        if not isinstance(guid, uuid.UUID):
-            guid = uuid.UUID(guid)
-        if isinstance(flags, int):
-            flags = struct.pack("H", flags)
-
-        caller = caller[:20]
-
-        notification = flags + guid.bytes_le
-        notification += struct.pack("H", len(caller)*2)
-        notification += struct.pack("L", call_id)
-        timestamp_string = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-        timestamp = convert_back(timestamp_string)
-
-        notification += struct.pack("<Qxx", timestamp)
-        notification += serialize_text(caller)
-
-        self.cargo.send(
-            PUSH_NOTIFICATION + struct.pack("<i", len(notification)))
-        self.wrapper.print(binascii.hexlify(notification))
-
-        self.cargo.send_for_result(notification)
-
-    def send_notification(self, title, text, guid=None,
-                          flags=NOTIFICATION_TYPES["Messaging"]):
-        if not guid:
-            return
-
-        if not isinstance(guid, uuid.UUID):
-            guid = uuid.UUID(guid)
-
-        if isinstance(flags, int):
-            flags = struct.pack("H", flags)
-
-        title = title[:20]
-        text = text[:160]
-
-        notification = flags + guid.bytes_le
-        notification += struct.pack("H", len(title)*2)
-        notification += struct.pack("H", len(text)*2)
-        timestamp_string = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-        timestamp = convert_back(timestamp_string)
-
-        notification += struct.pack("<Qxx", timestamp)
-        notification += serialize_text(title+text)
-
-        self.cargo.send(
-            PUSH_NOTIFICATION + struct.pack("<i", len(notification)))
-        self.cargo.send_for_result(notification)
-
-    def response_result(self, response):
-        error_code = struct.unpack("<I", response[2:6])[0]
-        if error_code:
-            self.wrapper.print("Error: %s" % error_code)
-        return not error_code
+    def send_notification(self, notification):
+        self.cargo.cargo_write_with_data(
+            CARGO_NOTIFICATION, notification.serialize())

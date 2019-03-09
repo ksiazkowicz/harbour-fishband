@@ -67,11 +67,6 @@ Page {
                 title: qsTr("Bluetooth status")
                 value: bandController.cargoServiceStatus
             }
-
-            Button {
-                text: "subs"
-                onClicked: bandController.testSubs()
-            }
         }
     }
 }

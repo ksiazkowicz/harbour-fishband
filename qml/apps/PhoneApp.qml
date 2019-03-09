@@ -36,17 +36,13 @@ App {
                 }
 
                 // send notification
-                bandController.callNotification(callId,
-                            person, BandConstants.phoneApp,
-                            BandConstants.flagIncomingCall)
+                bandController.callApp('PhoneApp', 'incoming_call', [callId, person])
                 activeVoiceCall.statusChanged.connect(function () {
                     if (activeVoiceCall.status == 1)
                         answered = true;
 
                     if (activeVoiceCall.status == 7 && !answered) {
-                        bandController.callNotification(callId,
-                                    person, BandConstants.phoneApp,
-                                    BandConstants.flagMissedCall)
+                        bandController.callApp('PhoneApp', 'missed_call', [callId, person])
                     }
                 })
             }

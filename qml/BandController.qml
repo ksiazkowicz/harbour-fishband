@@ -5,6 +5,7 @@ import io.thp.pyotherside 1.4
 
 Item {
     id: bandController
+    property var profile: {}
     property alias deviceName: deviceConf.deviceName
     property alias deviceLanguage: deviceConf.deviceLanguage
     property alias deviceSerialNumber: deviceConf.deviceSerialNumber
@@ -52,15 +53,9 @@ Item {
         })
     }
 
-    function sendNotification(title, body, tile, flags) {
-        python.call("wrapper.app.device.send_notification",
-                    [title, body, tile, flags])
-    }
-
-    function callNotification(call_id, caller, tile, flags) {
-        console.log(call_id)
-        python.call("wrapper.app.device.call_notification",
-                    [call_id, caller, tile, flags])
+    function sendNotification(title, body, tile, flag) {
+        python.call("wrapper.app.messaging_notification",
+                    [title, body, tile, flag])
     }
 
     function setTheme(base, highlight, lowlight, secondaryText, highContrast,
@@ -103,6 +98,12 @@ Item {
                 bandController.deviceName = info.name;
                 bandController.deviceLanguage = info.language;
                 bandController.deviceSerialNumber = info.serial_number;
+            })
+
+            setHandler("profile", function (profile) {
+                bandController.deviceName = profile.name;
+                bandController.deviceLanguage = profile.locale.name;
+                bandController.profile = profile;
             })
 
             setHandler("print", function (arguments) {

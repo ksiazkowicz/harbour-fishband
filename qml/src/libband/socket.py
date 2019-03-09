@@ -1,6 +1,7 @@
 import bluetooth
 import time
 import struct
+from libband.status import decode_status
 from . import CARGO_SERVICE_PORT, TIMEOUT, BUFFER_SIZE
 
 
@@ -52,6 +53,9 @@ class BandSocket:
             except bluetooth.btcommon.BluetoothError as error:
                 self.device.wrapper.print("Connecting because %s" % error)
                 self.connect()
+            except OSError as error:
+                # assume user actually wanted to disconnect
+                pass
         return result
 
     def send(self, packet):
@@ -63,24 +67,37 @@ class BandSocket:
             except bluetooth.btcommon.BluetoothError as error:
                 self.device.wrapper.print("Connecting because %s" % error)
                 self.connect()
+            except OSError as error:
+                # I guess we lost connection because of malformed packet
+                self.device.wrapper.print("Connecting because %s" % error)
+                self.connect()
 
     def send_for_result(self, packet, buffer_size=BUFFER_SIZE):
         results = []
-        success = True
+        success = False
 
         # send packet
         self.send(packet)
 
         while True:
-            self.socket.settimeout(5.0)
+            self.socket.settimeout(6.0)
             result = self.receive(BUFFER_SIZE)
 
-            # check if we got final result
-            if result[0:2] == b'\xfe\xa6':
-                error_code = struct.unpack("<I", result[2:6])[0]
-                if error_code:
-                    self.device.wrapper.print("Error: %s" % error_code)
-                success = not error_code
+            # break when we get empty response 
+            # (because we forgot to break on error? no clue)
+            if not result:
+                break
+
+            # check if we got status bits
+            if result[-6:-4] == b'\xfe\xa6':
+                status = decode_status(struct.unpack("<I", result[-4:])[0])
+                success = not status.get('is_error', False)
+                if not success:
+                    self.device.wrapper.print("Error: %s" % status)
+
+                if len(result) > 6:
+                    result = result[:-6]
+                    results.append(result)
                 break
 
             # nope, more data
@@ -89,3 +106,42 @@ class BandSocket:
         # we're done
         return success, results
 
+    def make_command_packet(
+        self, command, arguments_buffer_size, data_stage_size, arguments,
+        prepend_size):
+        result = bytes([])
+        if prepend_size:
+            result += bytes([8 + arguments_buffer_size])
+        result += struct.pack("<H", 12025)
+        result += struct.pack("<H", command)
+        result += struct.pack("<I", data_stage_size)
+        if arguments:
+            result += arguments
+        return result
+
+    def cargo_read(self, command, response_size):
+        command_packet = self.make_command_packet(
+            command, 
+            4, 
+            response_size, 
+            struct.pack("<I", response_size), 
+            True)
+        return self.send_for_result(command_packet)
+
+    def cargo_write(self, command, arguments=None):
+        packet = self.make_command_packet(
+            command, 
+            len(arguments) if arguments else 0, 
+            0, arguments, True)
+        return self.send_for_result(packet)
+
+    def cargo_write_with_data(self, command, data, arguments=None):
+        packet = self.make_command_packet(
+            command, 
+            len(arguments) if arguments else 0, 
+            len(data) if data else 0, 
+            arguments, 
+            True)
+        self.send(packet)
+        return self.send_for_result(data)
+    
